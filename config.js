@@ -7,7 +7,7 @@ var defaults = {
     },
 
     log4js: {
-        "level": "INFO",
+        "level": "DEBUG",
         "replaceConsole": true,
         "appenders": [
             {"type": "console"}
