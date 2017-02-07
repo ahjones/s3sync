@@ -1,3 +1,7 @@
+/*jslint node: true */
+/*jslint nomen: true*/
+"use strict";
+
 var AWS = require('aws-sdk'),
     async = require('async'),
     config = require('./config'),
@@ -13,7 +17,11 @@ var MAX_COPY_SIZE = 5 * 1024 * 1024 * 1024; // 5GB
 
 var getAWSLogger = _.memoize(function (category) {
     var logger = logging.getLogger(category);
-    return {log:function(o) {logger.trace(o)}}
+    return {
+        log: function (o) {
+            logger.trace(o);
+        }
+    };
 });
 
 var commonParams = {
@@ -25,9 +33,13 @@ var regions = config.s3sync.regions,
     buckets = config.s3sync.buckets;
 
 var getS3Obj = function (region) {
-    var regionObj = _.find(regions,{'region':region});
-    if (!regionObj) throw(new Error("Invalid region " + region));
-    var params = {apiVersion: '2012-06-01', region: regionObj.region, sslEnabled: true, logger:getAWSLogger('AWS-'+regionObj.region)};
+    var regionObj = _.find(regions, {'region': region}),
+        params;
+    if (!regionObj) {
+        throw (new Error("Invalid region " + region));
+    }
+
+    params = {apiVersion: '2012-06-01', region: regionObj.region, sslEnabled: true, logger: getAWSLogger('AWS-' + regionObj.region)};
     regionObj.account = 'BASE';
     if (regionObj.access) {
         regionObj.account = params.accessKeyId = regionObj.access;
@@ -41,42 +53,53 @@ function destName(key, bucket) {
     return key.replace(bucket.srcprefix, bucket.destprefix);
 }
 
-function listObjects(bucket,prefix,s3,cb) {
-    logger.debug("Scanning bucket [" + [bucket,prefix].join("/") + "]");
+function listObjects(bucket, prefix, s3, cb) {
+    logger.debug("Scanning bucket [" + [bucket, prefix].join("/") + "]");
     var params = {
         Bucket: bucket,
         Prefix: prefix
-    };
-    var res = {};
-    var more = true;
-    var icount = 1;
+    },
+        res = {},
+        more = true;
+
     function getBatch(cb) {
-        s3.s3.listObjects(params, function(err, data) {
-            if (err) return cb(err);
+        s3.s3.listObjects(params, function (err, data) {
+            if (err) {
+                return cb(err);
+            }
+
             more = data.IsTruncated;
-            _.each(data.Contents, function(obj) {
-                res[obj.Key] = {Key:obj.Key,LastModified:obj.LastModified,ETag:obj.ETag,Size:obj.Size};
+            _.each(data.Contents, function (obj) {
+                res[obj.Key] = {Key: obj.Key,
+                                LastModified: obj.LastModified,
+                                ETag: obj.ETag,
+                                Size: obj.Size};
             });
             if (more) {
-                params.Marker = _.last(data.Contents)['Key'];
+                params.Marker = _.last(data.Contents).Key;
             }
             cb();
         });
-    };
+    }
+
     async.whilst(
-        function(){return more},
+        function () {return more; },
         getBatch,
-        function(err) {
-            if (err) return cb(err);
+        function (err) {
+            if (err) {
+                return cb(err);
+            }
+
             cb(null, res);
         }
     );
 }
 
 function touchObject(dest, key, cb) {
-    var destKey = destName(key, dest.bucketObj);
-    logger.debug("Touching [" +[dest.bucket, destKey].join("/") + "]");
-    var params = _.clone(commonParams);
+    var destKey = destName(key, dest.bucketObj),
+        params;
+    logger.debug("Touching [" + [dest.bucket, destKey].join("/") + "]");
+    params = _.clone(commonParams);
     params.CopySource = encodeURIComponent([dest.bucket, destKey].join("/"));
     params.Bucket = dest.bucket;
     params.Key = destKey;
@@ -85,18 +108,21 @@ function touchObject(dest, key, cb) {
 }
 
 function copyObject(src, dest, key, cb) {
-    var express = (src.s3.account == dest.s3.account && src.keys[key].Size <= MAX_COPY_SIZE);
-    var destKey = destName(key, dest.bucketObj);
-    logger.debug((express ? "Express" : "Slow") + " copying [" + [[src.bucket, key].join("/"),[dest.bucket, destKey].join("/")].join(" --> ") + "]");
+    var express = (src.s3.account === dest.s3.account && src.keys[key].Size <= MAX_COPY_SIZE),
+        destKey = destName(key, dest.bucketObj),
+        params;
+
+    logger.debug((express ? "Express" : "Slow") + " copying [" + [[src.bucket, key].join("/"), [dest.bucket, destKey].join("/")].join(" --> ") + "]");
+
     if (express) {
-        var params = _.clone(commonParams);
+        params = _.clone(commonParams);
         params.CopySource = encodeURIComponent([src.bucket, key].join("/"));
         params.Bucket = dest.bucket;
         params.Key = destKey;
         params.MetadataDirective = "COPY";
         dest.s3.s3.copyObject(params, cb);
     } else {
-        var params = _.clone(commonParams);
+        params = _.clone(commonParams);
         params.Bucket = dest.bucket;
         params.Key = destKey;
         params.Body = src.s3.s3.getObject({Bucket: src.bucket, Key: key}).createReadStream();
@@ -107,7 +133,7 @@ function copyObject(src, dest, key, cb) {
 
 function deleteObject(dest, key, cb) {
     var destKey = destName(key, dest.bucketObj);
-    logger.debug("Deleting [" +[dest.bucket, destKey].join("/") + "]");
+    logger.debug("Deleting [" + [dest.bucket, destKey].join("/") + "]");
     dest.s3.s3.deleteObject({Bucket: dest.bucket, Key: destKey}, cb);
 }
 
@@ -130,24 +156,34 @@ function syncJobObject(bucket) {
     //    ]
     //}
     return {
-        src:{s3:getS3Obj(bucket.srcregion),bucket:bucket.src,bucketObj:bucket,keys:[]},
-        dest : _.map(_.map(bucket.destregions, getS3Obj), function(s3) {return {s3:s3,bucket:bucket.dest + s3.suffix,bucketObj:bucket,keys:[]}})
-    }
+        src: {s3: getS3Obj(bucket.srcregion),
+              bucket: bucket.src,
+              bucketObj: bucket,
+              keys: []},
+        dest : _.map(_.map(bucket.destregions, getS3Obj), function (s3) {
+            return {
+                s3: s3,
+                bucket: bucket.dest + s3.suffix,
+                bucketObj: bucket,
+                keys: []
+            };
+        })
+    };
 }
 
 function getSrc(bucket, cb) {
     var obj = syncJobObject(bucket);
-    function getSrc(cb) {
-        listObjects(bucket.src, bucket.srcprefix, obj.src.s3, function(err, res) {
+    function source(cb) {
+        listObjects(bucket.src, bucket.srcprefix, obj.src.s3, function (err, res) {
             obj.src.keys = res;
             cb(err);
         });
     }
-    function getDest(cb) {
+    function destination(cb) {
         async.map(
             obj.dest,
-            function(region, cb) {
-                listObjects(bucket.dest + region.s3.suffix, bucket.destprefix, region.s3, function(err, res) {
+            function (region, cb) {
+                listObjects(bucket.dest + region.s3.suffix, bucket.destprefix, region.s3, function (err, res) {
                     region.keys = res;
                     cb(err);
                 });
@@ -155,17 +191,17 @@ function getSrc(bucket, cb) {
             cb
         );
     }
-    async.parallel([getSrc,getDest], function(err) {
-        cb(err, {src:obj.src,dest:obj.dest});
+    async.parallel([source, destination], function (err) {
+        cb(err, {src: obj.src, dest: obj.dest});
     });
 }
 
 function compareBucketRegions(src, dest, cb) {
     // AWS should give us basically unlimited concurent requests, but each of these closures costs RAM.  This seems the most effective chokehold to stop leaks
     function copyForward(cb) {
-        async.eachLimit(Object.keys(src.keys), 100, async.ensureAsync(function(key, cb) {
-            var skey = src.keys[key];
-            var dkey = (dest.keys.hasOwnProperty(key) ? dest.keys[key] : undefined);
+        async.eachLimit(Object.keys(src.keys), 100, async.ensureAsync(function (key, cb) {
+            var skey = src.keys[key],
+                dkey = (dest.keys.hasOwnProperty(key) ? dest.keys[key] : undefined);
             if (!dkey) {
                 // Exists in src, but not dest.  Copy
                 return copyObject(src, dest, key, cb);
@@ -174,7 +210,7 @@ function compareBucketRegions(src, dest, cb) {
                 // Files are the same.  No action.
                 return cb();
             }
-            if (skey.ETag == dkey.ETag) {
+            if (skey.ETag === dkey.ETag) {
                 // Files are the same, but date mismatches.  Copy metaobject
                 return touchObject(dest, key, cb);
             }
@@ -183,7 +219,7 @@ function compareBucketRegions(src, dest, cb) {
         }), cb);
     }
     function cleanUp(cb) {
-        async.eachLimit(Object.keys(dest.keys), 50, async.ensureAsync(function(key, cb) {
+        async.eachLimit(Object.keys(dest.keys), 50, async.ensureAsync(function (key, cb) {
             var skey = (src.keys.hasOwnProperty(key) ? src.keys[key] : undefined);
             if (!skey) {
                 // Deleted in src.  Remove from dest.
@@ -216,16 +252,19 @@ function compareBucketRegions(src, dest, cb) {
 function fullSync(cb) {
     var starttime = new moment();
     logger.info("Starting");
-    async.each(buckets, function(bucket, cb) {
-        getSrc(bucket, function(err, toc) {
-            if (err) return cb(err);
-            logger.info("" + bucket.src + "/" + bucket.srcprefix +  " contains " + Object.keys(toc.src.keys).length + " keys");
-            toc.dest.forEach(function(dest) {
-                logger.info("" + bucket.dest + dest.s3.suffix  + "/" + bucket.destprefix + " contains " + Object.keys(dest.keys).length + " keys");
+    async.each(buckets, function (bucket, cb) {
+        getSrc(bucket, function (err, toc) {
+            if (err) {
+                return cb(err);
+            }
+
+            logger.info(bucket.src + "/" + bucket.srcprefix +  " contains " + Object.keys(toc.src.keys).length + " keys");
+            toc.dest.forEach(function (dest) {
+                logger.info(bucket.dest + dest.s3.suffix  + "/" + bucket.destprefix + " contains " + Object.keys(dest.keys).length + " keys");
             });
             async.each(toc.dest, async.apply(compareBucketRegions, toc.src), cb);
         });
-    }, function(err) {
+    }, function (err) {
         var endtime = new moment();
         logger.info("Operation took " + moment.duration(endtime - starttime).humanize() + " to complete");
         if (err) {
@@ -241,23 +280,29 @@ function fullSync(cb) {
 
 function handleMessage(message, done) {
     // Parse & validate the event
-    if (!(message && message.Body)) return done (new Error("missing message body: " + message));
-    var body;
+    if (!(message && message.Body)) {
+        logger.error("Missing message body");
+        return done(new Error("missing message body: " + message));
+    }
+
+    var body, action, rule, obj;
     try {
         body = JSON.parse(message.Body);
-    } catch(e) {
+    } catch (e) {
         return done(e);
     }
 
-    if (body && body.Event && body.Event == "s3:TestEvent") {
+    if (body && body.Event && body.Event === "s3:TestEvent") {
         logger.trace("Got S3 test event from Amazon.  Ignoring.");
         return done();
     }
 
-    if (body && body.Type && body.Type == "Notification" &&
-        body.MessageId && body.Message &&
-        body.Subject && body.Subject == "Amazon S3 Notification") {
+    if (body && body.Type && body.Type === "Notification" &&
+            body.MessageId && body.Message &&
+            body.Subject && body.Subject === "Amazon S3 Notification") {
+
         logger.trace("Unwrapping SNS notification");
+
         try {
             body = JSON.parse(body.Message);
         } catch (e) {
@@ -265,53 +310,52 @@ function handleMessage(message, done) {
         }
     }
 
-    if (!(body.Records && body.Records.length && body.Records.length == 1 &&
-          body.Records[0].eventSource == "aws:s3" && body.Records[0].s3 &&
-          body.Records[0].awsRegion && body.Records[0].eventName)) return done (new Error("invalid or missing s3 message: " + message.Body));
+    if (!(body.Records && body.Records.length && body.Records.length === 1 &&
+          body.Records[0].eventSource === "aws:s3" && body.Records[0].s3 &&
+          body.Records[0].awsRegion && body.Records[0].eventName)) {
+        logger.error("Invalid or missing S3 message: " + message.Body);
+        return done(new Error("invalid or missing s3 message: " + message.Body));
+    }
 
     // Find a matching action or ignore.  We know how to deal with all actions, so error if unknown
-    var action;
-
-    if (_.startsWith(body.Records[0].eventName,"ObjectCreated"))
-        action = "ObjectCreated"
-    else if (_.startsWith(body.Records[0].eventName,"ObjectRemoved"))
-        action = "ObjectRemoved"
-    else if (_.startsWith(body.Records[0].eventName,"ReducedRedundancyLostObject"))
-        action = "ReducedRedundancyLostObject"
+    if (_.startsWith(body.Records[0].eventName, "ObjectCreated")) {
+        action = "ObjectCreated";
+    } else if (_.startsWith(body.Records[0].eventName, "ObjectRemoved")) {
+        action = "ObjectRemoved";
+    } else if (_.startsWith(body.Records[0].eventName, "ReducedRedundancyLostObject")) {
+        action = "ReducedRedundancyLostObject";
+    }
 
     if (!action) {
-        done("Unknown action: " + body.Records[0].eventName)
+        done("Unknown action: " + body.Records[0].eventName);
     }
 
     // Find a matching config rule, or ignore if none matched
-    var rule;
-    if (action == "ObjectCreated" || action == "ObjectRemoved") {
-        var rule = _.find(config.s3sync.buckets, function(obj) {
-            return ((obj.src == body.Records[0].s3.bucket.name) &&
-                    (_.startsWith(body.Records[0].s3.object.key, obj.srcprefix)))
-            });
-    } else {
-        // TODO - generate a rule for ReducedRedundancyLostObject
+    if (action === "ObjectCreated" || action === "ObjectRemoved") {
+        rule = _.find(config.s3sync.buckets, function (obj) {
+            return ((obj.src === body.Records[0].s3.bucket.name) &&
+                    (_.startsWith(body.Records[0].s3.object.key, obj.srcprefix)));
+        });
     }
 
     if (!rule) {
-        logger.trace("No rule found.  Ignoring " + action + " event for " + body.Records[0].s3.object.key);
+        logger.error("No rule found.  Ignoring " + action + " event for " + body.Records[0].s3.object.key);
         return done();
     }
 
     // Deal with the event
-    if (action == "ObjectCreated") {
-        var obj = syncJobObject(rule);
+    if (action === "ObjectCreated") {
+        obj = syncJobObject(rule);
         obj.src.keys[body.Records[0].s3.object.key] = {Size: body.Records[0].s3.object.size};
-        async.each(obj.dest, function(dest, cb) {
+        async.each(obj.dest, function (dest, cb) {
             copyObject(obj.src, dest, body.Records[0].s3.object.key, cb);
         }, done);
         return;
     }
 
-    if (action == "ObjectRemoved") {
-        var obj = syncJobObject(rule);
-        async.each(obj.dest, function(dest, cb) {
+    if (action === "ObjectRemoved") {
+        obj = syncJobObject(rule);
+        async.each(obj.dest, function (dest, cb) {
             deleteObject(dest, body.Records[0].s3.object.key, cb);
         }, done);
         return;
@@ -320,20 +364,22 @@ function handleMessage(message, done) {
     done(new Error("Missing action"));
 }
 
+var shutdownfuncs = [];
+
 function sqsSync(cb) {
     logger.info("Connecting to SQS queue at " + config.s3sync.sqs.url);
     var q = sqs.create({
         queueUrl: config.s3sync.sqs.url,
         region: config.s3sync.sqs.region,
         handleMessage: handleMessage,
-        batchSize:10
+        batchSize: 10
     });
     q.start();
-    q.on("error", function(er) {
+    q.on("error", function (er) {
         logger.error("caught " + er);
     });
     function stop() {
-        logger.info("Shutting down SQS.   May take up to 30 seconds.")
+        logger.info("Shutting down SQS. May take up to 30 seconds.");
         q.stop();
         cb();
     }
@@ -341,10 +387,10 @@ function sqsSync(cb) {
 }
 
 function noop() {}
-var shutdownfuncs = [];
+
 function shutdown() {
     logger.warn("Caught shutdown signal.  Finishing jobs in process (send SIGTERM to forcefully kill)");
-    shutdownfuncs.forEach(function(f){f()});
+    shutdownfuncs.forEach(function (f) {f(); });
     shutdownfuncs = [];
 }
 
@@ -355,7 +401,7 @@ if (config.d) {
 if (config.fullsync && config.fullsync.interval) {
     logger.info("Scheduling full sync every " + config.fullsync.interval + "s");
     var i = setInterval(fullSync.bind(noop), config.fullsync.interval * 1000);
-    shutdownfuncs.push(function() {
+    shutdownfuncs.push(function () {
         clearInterval(i);
     });
 }
@@ -370,12 +416,14 @@ if (shutdownfuncs.length > 0) {
     process.on('SIGHUP', shutdown);
 }
 
-process.on('uncaughtException', function(err) {
+process.on('uncaughtException', function (err) {
     logger.error("Uncaught exception.  Shutting down!");
     logger.error(err);
     // Use setImmediate to force a clear callstach & allow shutdown() to finish processing shutdownfuncs at least once
-    setImmediate(function() {
+    setImmediate(function () {
         shutdown();
-        setTimeout(function(){process.exit(-1)}, 30000).unref();
+        setTimeout(function () {
+            process.exit(-1);
+        }, 30000).unref();
     });
 });
