@@ -338,7 +338,7 @@ function handleMessage(message, done) {
     }
 
     if (!rule) {
-        logger.error("No rule found.  Ignoring " + action + " event for " + body.Records[0].s3.object.key);
+        logger.error("No rule found. Ignoring " + action + " event for " + body.Records[0].s3.object.key);
         return done();
     }
 
