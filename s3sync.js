@@ -25,8 +25,7 @@ var getAWSLogger = _.memoize(function (category) {
 });
 
 var commonParams = {
-    ServerSideEncryption: "AES256",
-    StorageClass: "REDUCED_REDUNDANCY"
+    ServerSideEncryption: "AES256"
 };
 
 var regions = config.s3sync.regions,
