@@ -38,7 +38,11 @@ var getS3Obj = function (region) {
         throw (new Error("Invalid region " + region));
     }
 
-    params = {apiVersion: '2012-06-01', region: regionObj.region, sslEnabled: true, logger: getAWSLogger('AWS-' + regionObj.region)};
+    params = {apiVersion: '2006-03-01',
+              region: regionObj.region,
+              signatureVersion: 'v4',
+              sslEnabled: true,
+              logger: getAWSLogger('AWS-' + regionObj.region)};
     regionObj.account = 'BASE';
     if (regionObj.access) {
         regionObj.account = params.accessKeyId = regionObj.access;
