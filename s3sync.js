@@ -9,7 +9,8 @@ var AWS = require('aws-sdk'),
     logging = require('./logging'),
     moment = require('moment'),
     sqs = require('sqs-consumer'),
-    logger = logging.getLogger('s3sync');
+    logger = logging.getLogger('s3sync'),
+    domain = require('domain');
 
 AWS.config.update(config.aws);
 
@@ -113,31 +114,61 @@ function touchObject(dest, key, cb) {
 function copyObject(src, dest, key, cb) {
     var express = (src.s3.account === dest.s3.account && src.keys[key].Size <= MAX_COPY_SIZE),
         destKey = destName(key, dest.bucketObj),
-        params;
+        params,
+        d = domain.create();
 
     logger.debug((express ? "Express" : "Slow") + " copying [" + [[src.bucket, key].join("/"), [dest.bucket, destKey].join("/")].join(" --> ") + "]");
 
-    if (express) {
-        params = _.clone(commonParams);
-        params.CopySource = encodeURIComponent([src.bucket, key].join("/"));
-        params.Bucket = dest.bucket;
-        params.Key = destKey;
-        params.MetadataDirective = "COPY";
-        dest.s3.s3.copyObject(params, cb);
-    } else {
-        params = _.clone(commonParams);
-        params.Bucket = dest.bucket;
-        params.Key = destKey;
-        params.Body = src.s3.s3.getObject({Bucket: src.bucket, Key: key}).createReadStream();
-        params.ContentLength = src.keys[key].Size; // What happens if the file is updated between the listObjects and here?
-        dest.s3.s3.upload(params, cb);
-    }
+    d.on('error', function (e) {
+        if (e.code === "NoSuchKey") {
+            logger.warn("Unable to copy object that no longer exists: " + src.bucket + "/" + key);
+            cb();
+        } else if (!e.retryable) {
+            logger.error("Unable to copy object " + src.bucket + "/" + key + " with error " + e);
+            cb();
+        } else {
+            logger.error("Temporarily unable to copy object " + src.bucket + "/" + key + ". Will retry later");
+            cb(e);
+        }
+    });
+
+    d.run(function() {
+        if (express) {
+            params = _.clone(commonParams);
+            params.CopySource = encodeURIComponent([src.bucket, key].join("/"));
+            params.Bucket = dest.bucket;
+            params.Key = destKey;
+            params.MetadataDirective = "COPY";
+            dest.s3.s3.copyObject(params, cb);
+        } else {
+            params = _.clone(commonParams);
+            params.Bucket = dest.bucket;
+            params.Key = destKey;
+            params.Body = src.s3.s3.getObject({Bucket: src.bucket, Key: key}).createReadStream();
+            params.ContentLength = src.keys[key].Size; // What happens if the file is updated between the listObjects and here?
+            dest.s3.s3.upload(params, cb);
+        }
+    });
 }
 
 function deleteObject(dest, key, cb) {
-    var destKey = destName(key, dest.bucketObj);
-    logger.debug("Deleting [" + [dest.bucket, destKey].join("/") + "]");
-    dest.s3.s3.deleteObject({Bucket: dest.bucket, Key: destKey}, cb);
+    var destKey = destName(key, dest.bucketObj),
+        d = domain.create();
+
+    d.on('error', function (e) {
+        if (!e.retryable) {
+            logger.error("Unable to delete object " + dest.bucket + "/" + key + " with error " + e);
+            cb();
+        } else {
+            logger.error("Temporarily unable to copy object " + dest.bucket + "/" + key + ". Will retry later");
+            cb(e);
+        }
+    });
+
+    d.run(function() {
+        logger.debug("Deleting [" + [dest.bucket, destKey].join("/") + "]");
+        dest.s3.s3.deleteObject({Bucket: dest.bucket, Key: destKey}, cb);
+    });
 }
 
 function syncJobObject(bucket) {
