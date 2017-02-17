@@ -155,6 +155,8 @@ function deleteObject(dest, key, cb) {
     var destKey = destName(key, dest.bucketObj),
         d = domain.create();
 
+    logger.warn("Skipping call to delete");
+    return cb();
     d.on('error', function (e) {
         if (!e.retryable) {
             logger.error("Unable to delete object " + dest.bucket + "/" + key + " with error " + e);
@@ -245,8 +247,8 @@ function compareBucketRegions(src, dest, cb) {
                 return cb();
             }
             if (skey.ETag === dkey.ETag) {
-                // Files are the same, but date mismatches.  Copy metaobject
-                return touchObject(dest, key, cb);
+                return cb();
+                //return touchObject(dest, key, cb);
             }
             // Files differ.  Copy.
             return copyObject(src, dest, key, cb);
@@ -264,7 +266,7 @@ function compareBucketRegions(src, dest, cb) {
         }), cb);
     }
     logger.info("Syncing [" + src.bucket + " --> " + dest.bucket + "]");
-    async.parallel([copyForward, cleanUp], cb);
+    async.parallel([copyForward], cb);
 }
 //enum src (listObjects)
 //enum dest
