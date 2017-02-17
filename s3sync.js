@@ -384,7 +384,15 @@ function handleMessage(message, done) {
         obj = syncJobObject(rule);
         obj.src.keys[body.Records[0].s3.object.key] = {Size: body.Records[0].s3.object.size};
         async.each(obj.dest, function (dest, cb) {
-            copyObject(obj.src, dest, body.Records[0].s3.object.key, cb);
+            dest.s3.s3.headObject({Bucket: dest.bucket, Key: destName(body.Records[0].s3.object.key, dest.bucketObj)}, function(err, data) {
+                if (err === null) {
+                    logger.info(body.Records[0].s3.object.key + " is already present at destination, skipping");
+                    cb();
+
+                } else {
+                    copyObject(obj.src, dest, body.Records[0].s3.object.key, cb);
+
+                }});
         }, done);
         return;
     }
